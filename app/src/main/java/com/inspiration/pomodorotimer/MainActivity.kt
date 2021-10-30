@@ -10,94 +10,73 @@ import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.*
 import java.util.*
 
-class MainActivity : AppCompatActivity(), View.OnClickListener, Observer {
+class MainActivity : ComponentActivity(), View.OnClickListener {
     lateinit var button : Button
-    lateinit var textView : TextView
-    lateinit var textView2 : TextView
-    lateinit var time : PTimer
+    lateinit var textTime : TextView
+    lateinit var textStatus : TextView
 
-    private val vm : PViewModel by viewModels()
-
-    class PTimer : Observable() {
-        val posN = 25 * 60
-        val negN = 5 * 60
-        var value = posN
-        fun minute() : String = (value / 60).toString() + "分" + (value % 60) + "秒"
-        var flag : Boolean = true
-        fun status() : String = if(flag) "仕事中" else "休憩中"
-        lateinit var ob : Observer
-        override fun addObserver(o: Observer?) {
-            ob = o?:return
-            super.addObserver(o)
-        }
-        fun count() {
-            value--
-            notifyObservers()
-        }
-
-        override fun notifyObservers() {
-            ob.update(null, null)
-        }
-
-        fun reset() {
-            flag = !flag
-            value = if (flag) posN else negN
-            notifyObservers()
-        }
-    }
+    private val pViewModel : PViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContent {
+
+        }
         setContentView(R.layout.activity_main)
         Log.d("tag", "oncreate")
 
 
-        time = PTimer()
-        time.addObserver(this)
-
         button = findViewById(R.id.button)
         button.setOnClickListener(this)
         button.text = "スタート"
-        textView = findViewById(R.id.textView)
-        textView2 = findViewById(R.id.textView2)
-        textView2.text = time.status()
-        textView.text = time.minute()
+        textTime = findViewById(R.id.textTime)
+        textStatus = findViewById(R.id.textStatus)
 
+        pViewModel.status.observe(this) { textStatus.text = it }
+        pViewModel.displayTime.observe(this) { textTime.text = it }
 
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onClick(p0: View?) {
         if (p0?.id == button.id) {
+            Log.d("tag", "push")
             button.visibility = Button.INVISIBLE
             val intent = Intent(this, PomodoroService::class.java)
             startService(intent)
             CoroutineScope(Dispatchers.Default).launch {
-                while (time.value > 0) {
-                    delay(1000)
-                    time.count()
-                    Log.d("tag", "coroutine")
-                    if (time.value <= 0) {
-                        ToneGenerator(AudioManager.STREAM_SYSTEM, ToneGenerator.MAX_VOLUME).also {
-                            it.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT)
-                        }
-                        time.reset()
-                    }
-                }
+                timerStart()
             }
         }
     }
 
-    override fun update(p0: Observable?, p1: Any?) {
-        Log.d("tag", "update")
-        CoroutineScope(Dispatchers.Main).launch {
-            textView.text = time.minute()
-            textView2.text = time.status()
+    private suspend fun timerStart(){
+        while (true) {
+            if (pViewModel.time.nowValue > 0) {
+                delay(1000)
+                Log.d("tag", pViewModel.time.nowValue.toString())
+                CoroutineScope(Dispatchers.Main).async {
+                    pViewModel.count()
+                }.await()
+            }
+            else {
+                beep()
+                CoroutineScope(Dispatchers.Main).async {
+                    pViewModel.reset()
+                }.await()
+            }
         }
     }
 
+    private fun beep() {
+        ToneGenerator(AudioManager.STREAM_SYSTEM, ToneGenerator.MAX_VOLUME).also {
+            it.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT)
+        }
+    }
 }
